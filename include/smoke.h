@@ -78,8 +78,8 @@
 // buttons debounce delay (in milliseconds)
 #define BUTTONS_DEBOUNCE 100
 
-// touch sensors threshold (should be less than 254)
-#define BUTTONS_THRESHOLD 210
+// touch sensors threshold koefficient (from maximum at calibration)
+#define BUTTONS_THRESHOLD 0.85
 
 // buttons repeat delay (in milliseconds)
 #define BUTTONS_REPEAT_DELAY 500

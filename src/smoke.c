@@ -174,11 +174,18 @@ uint8_t doingtsc = 0;
 #define I_BLIGHT 4
 #endif
 
-// Debounce buttons stuff
+// Buttons calibration (searching for minimal sensor value for specified millseconds)
+int buttonscalib;
+
+// Touch sensor buttons stuff
 uint8_t sw_check[NBUTTONS];
 uint8_t sbuttons[NBUTTONS];
-uint8_t tmpbuttons[NBUTTONS];
+uint16_t tmpbuttons[NBUTTONS];
+uint16_t zerobuttons[NBUTTONS];
 uint32_t idlebuttons[NBUTTONS];
+
+// Processed buttons flags
+int pbuttons[NBUTTONS];
 
 // UI Control flags
 // We're in menu (+/- - navigate, coil - change, menu - exit)
@@ -191,9 +198,6 @@ uint8_t insleep;
 uint32_t needupdate = 0;
 // Have to wait until the  button is released (after wakeup, for example)
 uint8_t lockuntilrelease = 255;
-
-// Saving processed buttons flags
-int pbuttons[NBUTTONS];
 
 // Number of measures made
 uint32_t measures = 0;
@@ -208,8 +212,6 @@ void Start_USB() {
 	MX_USB_DEVICE_Init();
 }
 #endif
-
-#define PRESS_CHECK(x) (tmpbuttons[x] < BUTTONS_THRESHOLD)
 
 // Set up duty cycle on a timer
 void PWM_Timer_Set(TIM_HandleTypeDef *phtim, uint32_t channel, uint32_t pulse) {
@@ -594,6 +596,16 @@ void Check_Recharge() {
 
 int8_t buttons_phase = 0;
 
+// Calibrate touch sensors
+void Calibrate_Touch() {
+	unsigned int i;
+
+	// Calibrate buttons for 200 milliseconds
+	buttonscalib = 200;
+	for (i = 0; i < NBUTTONS; i++)
+		zerobuttons[i] = 65535;
+} //
+
 // Reset buttons state (init/wakeup)
 void Reset_Buttons() {
 	unsigned int i;
@@ -607,10 +619,15 @@ void Reset_Buttons() {
 		sbuttons[i] = 0;
 		idlebuttons[i] = 0;
 		sw_check[i] = 0;
-		tmpbuttons[i] = 255;
+		tmpbuttons[i] = 65535;
 		pbuttons[i] = 0;
 	}
 } // Reset_Buttons
+
+// Check if button is "pushed"
+int Push_Check(unsigned int button) {
+ return tmpbuttons[button] < zerobuttons[button];
+} // Push_Check
 
 uint32_t lasttick;
 
@@ -626,7 +643,7 @@ void debounce_buttons() {
 	lasttick = curtick;
 
 	for (i = 0; i < NBUTTONS; i++) {
-		press = PRESS_CHECK(i);
+		press = Push_Check(i);
 		if (sbuttons[i] != press) {
 			if (sw_check[i] > BUTTONS_DEBOUNCE) {
 				sw_check[i] = 0;
@@ -646,6 +663,8 @@ void debounce_buttons() {
 
 // This function should be called every 1 msec, will check all TSC groups every third call
 void Check_TSC_Buttons() {
+	unsigned int i;
+
 	switch (buttons_phase) {
 	case 0:
 		HAL_TSC_IODischarge(&htsc, ENABLE);
@@ -660,25 +679,25 @@ void Check_TSC_Buttons() {
 		if (HAL_TSC_GroupGetStatus(&htsc, TSC_GROUP2_IDX) == TSC_GROUP_COMPLETED)
 			tmpbuttons[0] = HAL_TSC_GroupGetValue(&htsc, TSC_GROUP2_IDX);
 		else
-			tmpbuttons[0] = 255;
+			tmpbuttons[0] = 65535;
 		if (HAL_TSC_GroupGetStatus(&htsc, TSC_GROUP3_IDX) == TSC_GROUP_COMPLETED)
 			tmpbuttons[1] = HAL_TSC_GroupGetValue(&htsc, TSC_GROUP3_IDX);
 		else
-			tmpbuttons[1] = 255;
+			tmpbuttons[1] = 65535;
 		if (HAL_TSC_GroupGetStatus(&htsc, TSC_GROUP4_IDX) == TSC_GROUP_COMPLETED)
 			tmpbuttons[2] = HAL_TSC_GroupGetValue(&htsc, TSC_GROUP4_IDX);
 		else
-			tmpbuttons[2] = 255;
+			tmpbuttons[2] = 65535;
 #ifndef SWAP_MENU_LIGHT
 		if (HAL_TSC_GroupGetStatus(&htsc, TSC_GROUP5_IDX) == TSC_GROUP_COMPLETED)
 			tmpbuttons[3] = HAL_TSC_GroupGetValue(&htsc, TSC_GROUP5_IDX);
 		else
-			tmpbuttons[3] = 255;
+			tmpbuttons[3] = 65535;
 #else
 		if (HAL_TSC_GroupGetStatus(&htsc, TSC_GROUP6_IDX) == TSC_GROUP_COMPLETED)
 			tmpbuttons[3] = HAL_TSC_GroupGetValue(&htsc, TSC_GROUP6_IDX);
 		else
-			tmpbuttons[3] = 255;
+			tmpbuttons[3] = 65535;
 #endif
 #ifndef DISABLE_LIGHT
 #if NBUTTONS == 5
@@ -686,16 +705,31 @@ void Check_TSC_Buttons() {
 		if (HAL_TSC_GroupGetStatus(&htsc, TSC_GROUP6_IDX) == TSC_GROUP_COMPLETED)
 			tmpbuttons[4] = HAL_TSC_GroupGetValue(&htsc, TSC_GROUP6_IDX);
 		else
-			tmpbuttons[4] = 255;
+			tmpbuttons[4] = 65535;
 #else
 		if (HAL_TSC_GroupGetStatus(&htsc, TSC_GROUP5_IDX) == TSC_GROUP_COMPLETED)
 			tmpbuttons[4] = HAL_TSC_GroupGetValue(&htsc, TSC_GROUP5_IDX);
 		else
-			tmpbuttons[4] = 255;
+			tmpbuttons[4] = 65535;
 #endif
 #endif
 #endif
-		debounce_buttons();
+		if (buttonscalib) {
+			buttonscalib--;
+			// Collect minimal values for all buttons
+			for (i = 0; i < NBUTTONS; i++)
+				if (zerobuttons[i] > tmpbuttons[i])
+					zerobuttons[i] = tmpbuttons[i];
+			// Calculating "pushed" value for all buttons
+			if (buttonscalib <= 0) {
+				buttonscalib = 0;
+				for (i = 0; i < NBUTTONS; i++) {
+					zerobuttons[i] = (uint16_t) trunc(zerobuttons[i] * BUTTONS_THRESHOLD);
+					debug("button %d zero value - %d\n", i, zerobuttons[i]);
+				}
+			}
+		} else
+			debounce_buttons();
 		break;
 	case 3:
 		HAL_TSC_Stop(&htsc);
@@ -765,9 +799,9 @@ int Wakeup_Check() {
 	}
 
 	// We check if pressed just one button, reset to start if else
-	if (PRESS_CHECK(should)) {
+	if (Push_Check(should)) {
 		for (i = 0; i < NBUTTONS; i++)
-			if ((i != should) && PRESS_CHECK(i)) {
+			if ((i != should) && Push_Check(i)) {
 				wakeupcount = 0;
 				wakeupphase = 0;
 				return 0;
@@ -867,6 +901,7 @@ void Setup() {
 #endif
 	lastawake = HAL_GetTick();
 	Calibrate_SDADC();
+	Calibrate_Touch();
 	Start_ADC();
 	Reset_Buttons();
 	Start_Timer();
