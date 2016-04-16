@@ -27,6 +27,9 @@
 
 // Extended debug (very noisy and may hung up)
 #define EXTENDED_DEBUG
+
+// Collecting coil data into internal memory to dump it after 10 seconds (doesn't work actually)
+// #define BURST_DEBUG_DATA
 #endif
 
 // 48 MHz clocking
@@ -79,7 +82,7 @@
 #define BUTTONS_DEBOUNCE 100
 
 // touch sensors threshold koefficient (from maximum at calibration)
-#define BUTTONS_THRESHOLD 0.85
+#define BUTTONS_THRESHOLD 0.90
 
 // buttons repeat delay (in milliseconds)
 #define BUTTONS_REPEAT_DELAY 500

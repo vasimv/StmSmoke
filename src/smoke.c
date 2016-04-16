@@ -35,6 +35,35 @@ char usboutbuf[256];
 va_list args;
 int nlen;
 
+int VCP_write(const void *pBuffer, int size)
+{
+    if (size > CDC_DATA_HS_OUT_PACKET_SIZE)
+    {
+        int offset;
+        for (offset = 0; offset < size; offset++)
+        {
+            int todo = MIN(CDC_DATA_HS_OUT_PACKET_SIZE,
+                           size - offset);
+            int done = VCP_write(((char *)pBuffer) + offset, todo);
+            if (done != todo)
+                return offset + done;
+        }
+
+        return size;
+    }
+
+    USBD_CDC_HandleTypeDef *pCDC =
+            (USBD_CDC_HandleTypeDef *)hUsbDeviceFS.pClassData;
+    while(pCDC->TxState) { } //Wait for previous transfer
+
+    USBD_CDC_SetTxBuffer(&hUsbDeviceFS, (uint8_t *)pBuffer, size);
+    if (USBD_CDC_TransmitPacket(&hUsbDeviceFS) != USBD_OK)
+        return 0;
+
+    while(pCDC->TxState) { } //Wait until transfer is done
+    return size;
+}
+
 void debug(char *fmt, ...) {
 	   // Check if we're really connected
 	   if (hUsbDeviceFS.dev_state != USBD_STATE_CONFIGURED)
@@ -42,7 +71,8 @@ void debug(char *fmt, ...) {
 	   va_start(args, fmt);
 	   nlen = vsnprintf(usboutbuf, sizeof(usboutbuf), fmt, args);
 	   va_end(args);
-	   CDC_Transmit_FS((uint8_t *) usboutbuf, nlen);
+	   // CDC_Transmit_FS((uint8_t *) usboutbuf, nlen);
+	   VCP_write(usboutbuf, nlen);
 }
 #else
 void debug(char *fmt, ...) {
@@ -308,6 +338,41 @@ void Start_Periph() {
 	MX_RTC_Init();
 } // Start_GPIO
 
+#ifdef BURST_DEBUG_DATA
+// Collecting data to print out through usb after run
+float datacollect[1024];
+unsigned int pos = 0;
+uint32_t lastcollect = 0;
+
+void Collect_Data(float data) {
+	lastcollect = HAL_GetTick();
+
+	datacollect[pos] = data;
+	pos++;
+	if (pos >= (sizeof(datacollect) / sizeof(datacollect[0])))
+		pos = 0;
+} // Collect_Data
+
+void Check_Dump_Data(unsigned int linesize) {
+	unsigned int i, j;
+
+	if ((HAL_GetTick() - lastcollect) > 10000) {
+		j = 0;
+
+		for (i = 0; i < pos; i++) {
+			debug("%f ", datacollect[i]);
+			HAL_Delay(10);
+			j++;
+			if (j >= linesize) {
+				debug("\n");
+				j = 0;
+			}
+		}
+		pos = 0;
+	}
+}
+#endif
+
 double errsum, lasterr;
 double outputlast;
 
@@ -317,10 +382,10 @@ void PID_Compute(int maxduty) {
     double derr = error - lasterr;
 
     errsum = errsum + error;
-    if (errsum > (5 * maxduty))
-    	errsum = 5*maxduty;
-    if (errsum < (-5 * maxduty))
-    	errsum = -5*maxduty;
+    if (errsum > PWM_COIL_PERIOD)
+    	errsum = PWM_COIL_PERIOD;
+    if (errsum < PWM_COIL_PERIOD)
+    	errsum = PWM_COIL_PERIOD;
     output = pidp * error + pidi * errsum + pidd * derr;
     if (output > maxduty)
     	output = maxduty;
@@ -383,7 +448,7 @@ void Update_PWM() {
 			}
 		} else
 			output = PWM_COIL_PERIOD - 1;
-		output = output / (float) dividelimit;
+		output = output / dividelimit;
 	} else {
 		// Temperature control
 		PID_Compute((PWM_COIL_PERIOD - 1) / dividelimit);
@@ -391,6 +456,13 @@ void Update_PWM() {
 		if ((tcoil - tcut) > 2)
 			output = 0;
 	}
+#ifdef BURST_DEBUG_DATA
+	Collect_Data(vmainv);
+	Collect_Data(coilv);
+	Collect_Data(rcoil);
+	Collect_Data(coilheat);
+	Collect_Data(output);
+#endif
 	Start_Coil();
 } // Update_PWM
 
@@ -1490,15 +1562,17 @@ void loop() {
 #endif
 
 #ifdef EXTENDED_DEBUG
-	debug("coilv %f (%d), vcheck %f (%d), vmainv %f (%d), output %f\n",
-			coilv, coilv_readout, vcheck, vcheck_readout, vmainv, vmainv_readout, output);
-	debug(" rcoil %f (%f:%f), vbat %f, vbalance %f, vusb %f, measures %u\n",
+	debug("coilv %f (%d), vcheck %f (%d), vmainv %f (%d), output %f\n rcoil %f (%f:%f), vbat %f, vbalance %f, vusb %f, measures %u\n",
+			coilv, coilv_readout, vcheck, vcheck_readout, vmainv, vmainv_readout, output,
 			rcoil, tcoil, rcoilzero, vbat, vbalance, vusb, measures);
-	debug("buttons: %d %d %d %d (%d)\n", tmpbuttons[0], tmpbuttons[1], tmpbuttons[2], tmpbuttons[3], coilheat);
-	debug("adc: %d %d %d %d %d %d %d\n", adcdata[0], adcdata[1], adcdata[2], adcdata[3],
-			VREFINT_CAL, TS_CAL1, TS_CAL2);
+//	debug("buttons: %d %d %d %d (%d)\n", tmpbuttons[0], tmpbuttons[1], tmpbuttons[2], tmpbuttons[3], coilheat);
+//	debug("adc: %d %d %d %d %d %d %d\n", adcdata[0], adcdata[1], adcdata[2], adcdata[3],
+//			VREFINT_CAL, TS_CAL1, TS_CAL2);
 #endif
 
+#ifdef BURST_DEBUG_DATA
+	Check_Dump_Data(5);
+#endif
 
 	Process_Buttons();
 
