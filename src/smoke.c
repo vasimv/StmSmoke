@@ -181,9 +181,9 @@ uint8_t charging = 0;
 float dividerratio = 0.2;
 
 // CONF - Coil PID regulator variables
-float pidp = 10.0;
-float pidi = 5.0;
-float pidd = 1.0;
+float pidp = 2.0;
+float pidi = 0.3;
+float pidd = 0.5;
 
 // Main loop cycle count
 uint32_t loopcycle = 0;
