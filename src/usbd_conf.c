@@ -81,7 +81,7 @@ void HAL_PCD_MspInit(PCD_HandleTypeDef* hpcd)
     __USB_CLK_ENABLE();
 
     /* Peripheral interrupt init*/
-    HAL_NVIC_SetPriority(USB_LP_IRQn, 0, 0);
+    HAL_NVIC_SetPriority(USB_LP_IRQn, 2, 0);
     HAL_NVIC_EnableIRQ(USB_LP_IRQn);
   /* USER CODE BEGIN USB_MspInit 1 */
 
