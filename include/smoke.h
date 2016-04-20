@@ -32,6 +32,9 @@
 // #define BURST_DEBUG_DATA
 #endif
 
+// Find best value for spread spectrum (lowest crosstalk to SDADC from TSC)
+#define CALIBRATE_SPREAD
+
 // 48 MHz clocking
 #define PWM_PERIOD_1MHZ 48
 #define PWM_PERIOD_100KHZ 480
@@ -141,6 +144,8 @@ extern void MX_RTC_Init(void);
 // Defined in usb_device.c
 extern USBD_HandleTypeDef hUsbDeviceFS;
 #endif
+
+extern int tscspread;
 
 // STM32F37x datasheet addresses
 //Temperature sensor raw value at 30 degrees C, VDDA=3.3V

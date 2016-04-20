@@ -556,17 +556,17 @@ void MX_TSC_Init(void)
   htsc.Init.CTPulseHighLength = TSC_CTPH_2CYCLES;
   htsc.Init.CTPulseLowLength = TSC_CTPL_2CYCLES;
   htsc.Init.SpreadSpectrum = ENABLE;
-  htsc.Init.SpreadSpectrumDeviation = 32;
+  htsc.Init.SpreadSpectrumDeviation = tscspread;
   htsc.Init.SpreadSpectrumPrescaler = TSC_SS_PRESC_DIV1;
-  htsc.Init.PulseGeneratorPrescaler = TSC_PG_PRESC_DIV16;
+  htsc.Init.PulseGeneratorPrescaler = TSC_PG_PRESC_DIV2;
   htsc.Init.MaxCountValue = TSC_MCV_1023;
   htsc.Init.IODefaultMode = TSC_IODEF_OUT_PP_LOW;
   htsc.Init.SynchroPinPolarity = TSC_SYNC_POL_FALL;
   htsc.Init.AcquisitionMode = TSC_ACQ_MODE_NORMAL;
   htsc.Init.ChannelIOs = TSC_GROUP2_IO2|TSC_GROUP3_IO4|TSC_GROUP4_IO2|TSC_GROUP5_IO2
                     |TSC_GROUP6_IO2;
-  htsc.Init.SamplingIOs = TSC_GROUP2_IO1|TSC_GROUP1_IO1|TSC_GROUP3_IO3|TSC_GROUP4_IO1
-                    |TSC_GROUP5_IO1|TSC_GROUP6_IO1;
+  htsc.Init.SamplingIOs = TSC_GROUP2_IO1|TSC_GROUP3_IO3|TSC_GROUP4_IO1|TSC_GROUP5_IO1
+                    |TSC_GROUP6_IO1;
   HAL_TSC_Init(&htsc);
 
 }

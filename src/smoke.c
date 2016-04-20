@@ -54,13 +54,12 @@ int VCP_write(const void *pBuffer, int size)
 
     USBD_CDC_HandleTypeDef *pCDC =
             (USBD_CDC_HandleTypeDef *)hUsbDeviceFS.pClassData;
-    while(pCDC->TxState) { } //Wait for previous transfer
+    // XXX - set timeout?
+    while(pCDC->TxState) {  HAL_Delay(10); } //Wait for previous transfer
 
     USBD_CDC_SetTxBuffer(&hUsbDeviceFS, (uint8_t *)pBuffer, size);
     if (USBD_CDC_TransmitPacket(&hUsbDeviceFS) != USBD_OK)
         return 0;
-
-    while(pCDC->TxState) { } //Wait until transfer is done
     return size;
 }
 
@@ -181,9 +180,9 @@ uint8_t charging = 0;
 float dividerratio = 0.2;
 
 // CONF - Coil PID regulator variables
-float pidp = 2.0;
-float pidi = 0.3;
-float pidd = 0.5;
+float pidp = 10.0;
+float pidi = 0.2;
+float pidd = 2.0;
 
 // Main loop cycle count
 uint32_t loopcycle = 0;
@@ -206,6 +205,9 @@ uint8_t doingtsc = 0;
 
 // Buttons calibration (searching for minimal sensor value for specified millseconds)
 int buttonscalib;
+
+// TSC Spread Spectrum (for less crosstalks to SDADC;
+int tscspread = 1;
 
 // Touch sensor buttons stuff
 uint8_t sw_check[NBUTTONS];
@@ -356,7 +358,8 @@ void Collect_Data(float data) {
 void Check_Dump_Data(unsigned int linesize) {
 	unsigned int i, j;
 
-	if ((HAL_GetTick() - lastcollect) > 10000) {
+	if ((pos > 0) && (HAL_GetTick() - lastcollect) > 10000) {
+		debug("pos: %f\n", pos);
 		j = 0;
 
 		for (i = 0; i < pos; i++) {
@@ -373,13 +376,13 @@ void Check_Dump_Data(unsigned int linesize) {
 }
 #endif
 
-double errsum, lasterr;
-double outputlast;
+float errsum, lasterr;
+float outputlast;
 
 // PID controller for temperature control
 void PID_Compute(int maxduty) {
-	double error = tcut - tcoil;
-    double derr = error - lasterr;
+	float error = tcut - tcoil;
+    float derr = error - lasterr;
 
     errsum = errsum + error;
     if (errsum > PWM_COIL_PERIOD)
@@ -474,6 +477,11 @@ void measure_int() {
 	// We need to turn off coil to take measure
 	uint32_t chan;
 
+#ifndef CALIBRATE_SPREAD
+	// Skip cycles while TSC is running (too much interference)
+	if (doingtsc)
+		return;
+#endif
 	// Turn off coil and open test FET
 	Stop_Coil();
 	HAL_GPIO_WritePin(GPIOE, GPIO_PIN_8, GPIO_PIN_SET);
@@ -481,8 +489,8 @@ void measure_int() {
 	for (int i = 0; i < FET_SWITCH_DELAY; i++);
 #endif
     // Start SDADCs conversion
-	HAL_SDADC_InjectedStart(&hsdadc3);
 	HAL_SDADC_InjectedStart(&hsdadc2);
+	HAL_SDADC_InjectedStart(&hsdadc3);
 	HAL_SDADC_InjectedStart(&hsdadc1);
 	// Wait for all SDADCs to finish
 	while ((HAL_SDADC_PollForInjectedConversion(&hsdadc1, 0) == HAL_TIMEOUT)
@@ -503,7 +511,7 @@ void measure_int() {
     vcheck = ((VREF_SDADC / 65536.0) / dividerratio) * (vcheck_readout + 32767);
     vmainv = ((VREF_SDADC / 65536.0) / dividerratio) * (vmainv_readout + 32767);
     // Calculate coil resistance, substracting test FET forward voltage
-	rcoil = RTEST * ((vmainv - vcheck) / (coilv - vcheck) - 1);
+	rcoil = RTEST * ((vmainv - vcheck) / (coilv - vcheck) - 1.0);
 	if (((rcoilzero / 2) > rcoil) && (rcoillock < 0.01)) {
 		rcoilzero = rcoil;
 		tcoil = tair;
@@ -924,6 +932,41 @@ void Start_Measure() {
 	HAL_TIM_Base_Start_IT(&htim6);
 } // Start_Measure
 
+#ifdef CALIBRATE_SPREAD
+float range[128];
+
+// Find best spread spectrum value of TSC (by lowest crosstalk to SDADC
+void Calibrate_Spread() {
+	unsigned int i, j;
+	float min, max;
+
+	for (i = 0; i < 128; i++) {
+		tscspread = i;
+		MX_TSC_Init();
+		min = 9999999.9;
+		max = 0.0;
+		for (j = 0; j < 10; j++) {
+			Check_TSC_Buttons();
+			HAL_Delay(1);
+			if (vmainv > max)
+				max = vmainv;
+			if (vmainv < min)
+				min = vmainv;
+		}
+		range[i] = max - min;
+	}
+	min = 9999999.9;
+	for (i = 0; i < 128; i++)
+		if (range[i] < min) {
+			tscspread = i;
+			min = range[i];
+		}
+	debug("TSC Spread %d with %fV\n", tscspread, min);
+	MX_TSC_Init();
+} // Calibrate_Spread
+#endif
+
+
 // Start SDADC
 void Start_SDADC() {
 
@@ -972,8 +1015,11 @@ void Setup() {
 	HAL_Delay(5000);
 #endif
 	lastawake = HAL_GetTick();
-	Calibrate_SDADC();
 	Calibrate_Touch();
+#ifdef CALIBRATE_SPREAD
+	Calibrate_Spread();
+#endif
+	Calibrate_SDADC();
 	Start_ADC();
 	Reset_Buttons();
 	Start_Timer();
@@ -1190,13 +1236,15 @@ void Draw_Main() {
   if (vmainv >= WARN_VOLTAGE)
 	  flag = "OK";
   else {
-    if ((HAL_GetTick() % 500) < 250)
-      u8g_SetFont(&u8g, u8g_font_9x15B);
+	if ((HAL_GetTick() % 500) < 250) {
+		u8g_DrawBox(&u8g, CX(0), CY(2) + TEXT_BOTTOM_OFFSET, MAX_WIDTH, LINE_HEIGHT);
+		Set_Inverted(1);
+	}
     flag = "LOW!";
   }
   snprintf(tmpbuf, sizeof(tmpbuf), "Vbatt %3.1fV %s", vmainv_show, flag);
   u8g_DrawStr(&u8g, CX(0), CY(3), tmpbuf);
-  u8g_SetFont(&u8g, u8g_font_9x15);
+  Set_Inverted(0);
 
   if (charging || (sbuttons[I_BCOIL] && alert)) {
 	  // User pressed COIL but we have a problem, print it on the first line
@@ -1513,16 +1561,19 @@ void Minimal_Unsleep() {
 void Finish_Unsleep() {
 	loopcycle = 0;
 	lastawake = HAL_GetTick();
+	u8g_SleepOff(&u8g);
 	Start_SDADC();
 	Start_ADC();
 	Start_PWM();
 	Reset_Coil();
+#ifdef CALIBRATE_SPREAD
+	Calibrate_Spread();
+#endif
 	Calibrate_SDADC();
 	Start_Measure();
 #ifdef USB_DEBUG
 	Start_USB();
 #endif
-	u8g_SleepOff(&u8g);
 } // Full_Unsleep
 
 // main loop
@@ -1565,7 +1616,7 @@ void loop() {
 	debug("coilv %f (%d), vcheck %f (%d), vmainv %f (%d), output %f\n rcoil %f (%f:%f), vbat %f, vbalance %f, vusb %f, measures %u\n",
 			coilv, coilv_readout, vcheck, vcheck_readout, vmainv, vmainv_readout, output,
 			rcoil, tcoil, rcoilzero, vbat, vbalance, vusb, measures);
-//	debug("buttons: %d %d %d %d (%d)\n", tmpbuttons[0], tmpbuttons[1], tmpbuttons[2], tmpbuttons[3], coilheat);
+	debug("buttons: %d %d %d %d (%d)\n", tmpbuttons[0], tmpbuttons[1], tmpbuttons[2], tmpbuttons[3], coilheat);
 //	debug("adc: %d %d %d %d %d %d %d\n", adcdata[0], adcdata[1], adcdata[2], adcdata[3],
 //			VREFINT_CAL, TS_CAL1, TS_CAL2);
 #endif
