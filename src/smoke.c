@@ -814,6 +814,19 @@ void Check_TSC_Buttons() {
 	case 3:
 		HAL_TSC_Stop(&htsc);
 		break;
+	case 4:
+	case 5:
+	case 6:
+	case 7:
+	case 8:
+	case 9:
+	case 10:
+	case 11:
+	case 12:
+	case 13:
+	case 14:
+	case 15:
+		break;
 	default:
 		buttons_phase = -1;
 	}
@@ -1465,54 +1478,55 @@ void Process_Buttons() {
 			}
 			return;
 		} else {
+			// Ignore other buttons while COIL pressed
 			if (coilheat) {
 				coilheat = 0;
 				Reset_Coil();
 			}
-		}
-		// Changing temperature/power with plus/minus buttons
-		if (Just_Pushed(I_BPLUS) && !changekeylock) {
-			debug("Plus!\n");
-			if (coilmode && pcut < MAX_COIL_POWER) {
-				pcut = pcut + 0.5;
-				Round_PCUT();
+			// Changing temperature/power with plus/minus buttons
+			if (Just_Pushed(I_BPLUS) && !changekeylock) {
+				debug("Plus!\n");
+				if (coilmode && pcut < MAX_COIL_POWER) {
+					pcut = pcut + 0.5;
+					Round_PCUT();
+				}
+				if (!coilmode && tcut < 300)
+					tcut = round(tcut + 1);
+				needupdate = 1;
 			}
-			if (!coilmode && tcut < 300)
-				tcut = round(tcut + 1);
-			needupdate = 1;
-		}
-		if (Just_Pushed(I_BMINUS) && !changekeylock) {
-			debug("Minus!\n");
-			if (coilmode && pcut > 0.5) {
-				pcut = pcut - 0.5;
-				Round_PCUT();
+			if (Just_Pushed(I_BMINUS) && !changekeylock) {
+				debug("Minus!\n");
+				if (coilmode && pcut > 0.5) {
+					pcut = pcut - 0.5;
+					Round_PCUT();
+				}
+				if (!coilmode && tcut > 30)
+					tcut = round(tcut - 1);
+				needupdate = 1;
 			}
-			if (!coilmode && tcut > 30)
-				tcut = round(tcut - 1);
-			needupdate = 1;
-		}
 
-		// Entering menu with menu button
-		if (Just_Pushed(I_BMENU) == 1) {
-			// ignore MENU button right after wake up
-			if (lockuntilrelease == I_BMENU)
-				lockuntilrelease = 255;
-			else {
-				startitem = 0;
-				selectitem = 0;
-				inmenu = 1;
-				debug("Entering menu\n");
+			// Entering menu with menu button
+			if (Just_Pushed(I_BMENU) == 1) {
+				// ignore MENU button right after wake up
+				if (lockuntilrelease == I_BMENU)
+					lockuntilrelease = 255;
+				else {
+					startitem = 0;
+					selectitem = 0;
+					inmenu = 1;
+					debug("Entering menu\n");
+				}
 			}
-		}
 #ifndef DISABLE_LIGHT
 #if NBUTTONS == 5
-		// Check LIGHT button, same function as menu item "Flashlight"
-		if (!lighton && sbuttons[I_BLIGHT])
-			Start_Light();
-		if (lighton && !sbuttons[I_BLIGHT])
-			Stop_Light();
+			// Check LIGHT button, same function as menu item "Flashlight"
+			if (!lighton && sbuttons[I_BLIGHT])
+				Start_Light();
+			if (lighton && !sbuttons[I_BLIGHT])
+				Stop_Light();
 #endif
 #endif
+		}
 	}
 } // Process_Buttons
 

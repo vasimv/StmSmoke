@@ -82,10 +82,10 @@
 #define FET_SWITCH_DELAY 36
 
 // buttons debounce delay (in milliseconds)
-#define BUTTONS_DEBOUNCE 100
+#define BUTTONS_DEBOUNCE 200
 
 // touch sensors threshold koefficient (from maximum at calibration)
-#define BUTTONS_THRESHOLD 0.90
+#define BUTTONS_THRESHOLD 0.95
 
 // buttons repeat delay (in milliseconds)
 #define BUTTONS_REPEAT_DELAY 500
