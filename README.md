@@ -16,3 +16,6 @@ STM32CubeMX, main files is:
  src/smoke.c (main code)
 
 The project uses the u8glib library to interface with the screen ( https://github.com/olikraus/u8glib ).
+
+Note, new version uses FDV304P p-fet as additional output MOSFET driver and inverted PWM output, will not
+work with older hadrware (comment #define INVERTED_PWM_COIL in smoke.h)!

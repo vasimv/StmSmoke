@@ -249,12 +249,16 @@ void Start_USB() {
 void PWM_Timer_Set(TIM_HandleTypeDef *phtim, uint32_t channel, uint32_t pulse) {
 	TIM_OC_InitTypeDef sConfigOC;
 
-	 sConfigOC.OCMode = TIM_OCMODE_PWM1;
-	 sConfigOC.Pulse = pulse;
-	 sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
-	 sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-	 HAL_TIM_PWM_ConfigChannel(phtim, &sConfigOC, channel);
-	 HAL_TIM_PWM_Start(phtim, channel);
+	sConfigOC.OCMode = TIM_OCMODE_PWM1;
+	sConfigOC.Pulse = pulse;
+	sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+#ifdef INVERTED_PWM_COIL
+	if (phtim == &htim2)
+		sConfigOC.OCPolarity = TIM_OCPOLARITY_LOW;
+#endif
+	sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+	HAL_TIM_PWM_ConfigChannel(phtim, &sConfigOC, channel);
+	HAL_TIM_PWM_Start(phtim, channel);
 } // PWM_Timer_Set
 
 void Stop_PWM() {
@@ -273,8 +277,9 @@ void Start_PWM() {
 	htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
 	htim2.Init.Period = (PWM_COIL_PERIOD - 1);
 	htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-
 	HAL_TIM_Base_Init(&htim2);
+	PWM_Timer_Set(&htim2, TIM_CHANNEL_1, 0);
+
 	MX_TIM3_Init();
 	PWM_Timer_Set(&htim3, TIM_CHANNEL_1, 0);
 	charging = 0;
@@ -284,7 +289,8 @@ void Start_PWM() {
 
 // Stop PWM output on coil temporarily
 void Stop_Coil() {
-	PWM_Timer_Set(&htim2, TIM_CHANNEL_1, 0);
+	TIM2->CR1 &= ~ TIM_CR1_ARPE;
+	TIM2->CCR1 = 0;
 } // Stop_Coil
 
 // Restart PWM output on coil FET
@@ -298,7 +304,8 @@ void Start_Coil() {
 	timout = trunc(output);
 	if (timout >= PWM_COIL_PERIOD)
 		timout = PWM_COIL_PERIOD - 1;
-	PWM_Timer_Set(&htim2, TIM_CHANNEL_1, timout);
+	TIM2->CCR1 = timout;
+	TIM2->CR1 |= TIM_CR1_ARPE;
 } // Start_Coil
 
 // Reset coil variables/timers
@@ -503,7 +510,7 @@ void measure_int() {
 		Start_Coil();
 
     // Weird HAL functions returns uint32_t while it is signed int16 actually
-	coilv_readout = (int16_t) HAL_SDADC_InjectedGetValue(&hsdadc1, &chan);
+	coilv_readout =  (int16_t) HAL_SDADC_InjectedGetValue(&hsdadc1, &chan);
 	vcheck_readout = (int16_t) HAL_SDADC_InjectedGetValue(&hsdadc2, &chan);
 	vmainv_readout = (int16_t) HAL_SDADC_InjectedGetValue(&hsdadc3 , &chan);
 #endif
@@ -658,7 +665,11 @@ void Update_Recharge() {
 void Check_Recharge() {
 #ifndef DISABLE_CHARGING
 	if (charging) {
+#ifdef DISABLE_BALANCE
+		if ((vusb < 1.0) || (vmainv >= maxcharge) || (tchip > 70)) {
+#else
 		if ((vusb < 1.0) || (vmainv >= maxcharge) || (tchip > 70) || ((vbalance > 1.0) && (vbalance < 5.0) && (vbalance >= (maxcharge / 2.0)))) {
+#endif
 			// Stop charging process
 			charging = 0;
 			Set_Recharge(0);
@@ -666,7 +677,11 @@ void Check_Recharge() {
 		}
 		Update_Recharge();
 	} else {
+#ifdef DISABLE_BALANCE
+		if ((vusb > 1.0) && (vmainv < (maxcharge - 0.2))) {
+#else
 		if ((vusb > 1.0) && (vmainv < (maxcharge - 0.2)) && ((vbalance < 1.0) || (vbalance > 5.0) || (vbalance < ((maxcharge - 0.5) / 2.0)))) {
+#endif
 			// Start charging process
 			Update_Recharge();
 		}
@@ -703,6 +718,18 @@ void Reset_Buttons() {
 		pbuttons[i] = 0;
 	}
 } // Reset_Buttons
+
+// Clear buttons pressed status (after coil fire)
+void Clear_Buttons() {
+	unsigned int i;
+
+	for (i = 0; i < NBUTTONS; i++) {
+		idlebuttons[i] = 0;
+		sbuttons[i] = 0;
+		pbuttons[i] = 0;
+		sw_check[i] = 0;
+	}
+} // Clear buttons
 
 // Check if button is "pushed"
 int Push_Check(unsigned int button) {
@@ -874,6 +901,10 @@ int Wakeup_Check() {
 		should = I_BMINUS;
 		break;
 	case 2:
+#ifdef WAKEUP_ONLY_TWO
+		wakeupphase = 0;
+		return 1;
+#endif
 		should = I_BMENU;
 		break;
 	case 3:
@@ -885,7 +916,7 @@ int Wakeup_Check() {
 	}
 
 	wakeupcount++;
-	if (wakeupcount > 10) {
+	if (wakeupcount > 50) {
 		wakeupcount = 0;
 		wakeupphase = 0;
 		return 0;
@@ -894,7 +925,9 @@ int Wakeup_Check() {
 	// We check if pressed just one button, reset to start if else
 	if (Push_Check(should)) {
 		for (i = 0; i < NBUTTONS; i++)
-			if ((i != should) && Push_Check(i)) {
+//			if ((i != should) && Push_Check(i)) {
+			if (((should == I_BPLUS) && Push_Check(I_BMINUS))
+					|| ((should == I_BMINUS) && Push_Check(I_BPLUS))) {
 				wakeupcount = 0;
 				wakeupphase = 0;
 				return 0;
@@ -991,11 +1024,11 @@ void Stop_SDADC() {
 } // Stop_SDADC
 
 void Calibrate_SDADC() {
-	HAL_SDADC_CalibrationStart(&hsdadc1, SDADC_CALIBRATION_SEQ_1);
+	HAL_SDADC_CalibrationStart(&hsdadc1, SDADC_CALIBRATION_SEQ_3);
 	HAL_SDADC_PollForCalibEvent(&hsdadc1, HAL_MAX_DELAY);
-	HAL_SDADC_CalibrationStart(&hsdadc2, SDADC_CALIBRATION_SEQ_1);
+	HAL_SDADC_CalibrationStart(&hsdadc2, SDADC_CALIBRATION_SEQ_3);
 	HAL_SDADC_PollForCalibEvent(&hsdadc2, HAL_MAX_DELAY);
-	HAL_SDADC_CalibrationStart(&hsdadc3, SDADC_CALIBRATION_SEQ_1);
+	HAL_SDADC_CalibrationStart(&hsdadc3, SDADC_CALIBRATION_SEQ_3);
 	HAL_SDADC_PollForCalibEvent(&hsdadc3, HAL_MAX_DELAY);
 } // Calibrate_SDADC
 
@@ -1111,7 +1144,7 @@ menuitem configmenu[] = {
 		{"Power limit", "W", &pcut, 0.5, MAX_COIL_POWER, 0.5, TFLOAT, NULL, NULL, NULL},
 		{"Temperature", "C", &tcut, 40, 300, 5, TFLOAT, NULL, NULL, NULL},
 		{"Lock Resist", "Ohm", &rcoillock, 0.0, 10.0, 0.01, TFLOAT, &Lock_Coil, NULL, NULL},
-		{"Change lock", NULL, &changekeylock, 0, 1, 1, TENUM, NULL, NULL, &OnOff_Str},
+		{"Change lock", NULL, &changekeylock, 1, 1, 1, TENUM, NULL, NULL, &OnOff_Str},
 		{"Slow start", "ms", &slowheat, 0, 3000, 300, TINT, NULL, NULL, NULL},
 		{"Min Rcoil", "Ohm", &rmincoil, 0.1, 1.0, 0.1, TFLOAT, NULL, NULL, NULL},
 		{"Max Rcoil", "Ohm", &rmaxcoil, 0.5, 10.0, 0.1, TFLOAT, NULL, NULL, NULL},
@@ -1482,6 +1515,7 @@ void Process_Buttons() {
 			if (coilheat) {
 				coilheat = 0;
 				Reset_Coil();
+				Clear_Buttons();
 			}
 			// Changing temperature/power with plus/minus buttons
 			if (Just_Pushed(I_BPLUS) && !changekeylock) {
@@ -1520,7 +1554,7 @@ void Process_Buttons() {
 #ifndef DISABLE_LIGHT
 #if NBUTTONS == 5
 			// Check LIGHT button, same function as menu item "Flashlight"
-			if (!lighton && sbuttons[I_BLIGHT])
+			if (!charging && !lighton && sbuttons[I_BLIGHT])
 				Start_Light();
 			if (lighton && !sbuttons[I_BLIGHT])
 				Stop_Light();

@@ -16,7 +16,7 @@
  *    along with this program. */
 
 // Dump debug information through USB virtual com-port (may create weird effects, DON'T USE if you don't need)
-// #define USB_DEBUG
+//#define USB_DEBUG
 
 #ifdef USB_DEBUG
 // Disable USB charging (for test purposes)
@@ -40,6 +40,12 @@
 #define PWM_PERIOD_100KHZ 480
 #define PWM_PERIOD_10KHZ 4800
 
+// Inverted output of coil's PWM (0 to heat), in case if you have inverted PWM driver with P-FET
+#define INVERTED_PWM_COIL
+
+// Disable balance check (if not connected)
+// #define DISABLE_BALANCE
+
 // Use inductor-based schematics (double check or it'll fry your board!)
 // Inductor - TIM2_CH1 - Coil FET with gate driver, TIM3_CH3 - USB boost FET, PC13 - LED/with resistor
 //  ADC1_IN0 - USB, ADC1_IN2 - 2S balance pin, SDADC1_AIN7P - Current sense, SDADC3_AIN6P - Battery
@@ -58,7 +64,9 @@
 #define DISABLE_LIGHT
 #else
 #define NBUTTONS 5
-#define PWM_COIL_PERIOD PWM_PERIOD_10KHZ // 10 KHz pwm output, without gate driver
+//#define PWM_COIL_PERIOD PWM_PERIOD_10KHZ // 10 KHz pwm output, without gate driver
+#define PWM_COIL_PERIOD PWM_PERIOD_100KHZ // 100 KHz pwm output, with FDV304P P-FET as gate driver
+//#define PWM_COIL_PERIOD PWM_PERIOD_1MHZ
 #define LED_TIM3CH1
 // duty for LED buck regulator (70 mA current with two white LEDs in series)
 #define LED_PWM_DUTY 36
@@ -70,7 +78,7 @@
 #endif
 
 // Disable light button
-#define DISABLE_LIGHT
+//#define DISABLE_LIGHT
 
 // Maximum coil heat time (in milliseconds)
 #define MAX_COIL_TIME 60000
@@ -82,13 +90,16 @@
 #define FET_SWITCH_DELAY 36
 
 // buttons debounce delay (in milliseconds)
-#define BUTTONS_DEBOUNCE 200
+#define BUTTONS_DEBOUNCE 100
 
 // touch sensors threshold koefficient (from maximum at calibration)
-#define BUTTONS_THRESHOLD 0.95
+#define BUTTONS_THRESHOLD 0.9
 
 // buttons repeat delay (in milliseconds)
 #define BUTTONS_REPEAT_DELAY 500
+
+// Use only +/- to wake up instead +/-/M
+#define WAKEUP_ONLY_TWO
 
 // Write configuration to flash after last change (in milliseconds)
 #define UPDATE_FLASH_AFTER 30000
